@@ -2,12 +2,17 @@ package com.abc;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import static java.lang.Math.abs;
+
+import java.math.BigDecimal;
 
 public class Customer {
     private String name;
     private List<Account> accounts;
+    
+    private ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
 
     public Customer(String name) {
         this.name = name;
@@ -19,7 +24,9 @@ public class Customer {
     }
 
     public Customer openAccount(Account account) {
-        accounts.add(account);
+    	readWriteLock.writeLock().lock();
+    	accounts.add(account);
+    	readWriteLock.writeLock().unlock();
         return this;
     }
 
@@ -27,52 +34,56 @@ public class Customer {
         return accounts.size();
     }
 
-    public double totalInterestEarned() {
-        double total = 0;
+    public BigDecimal totalInterestEarned() {
+    	readWriteLock.readLock().lock();
+    	BigDecimal total = new BigDecimal(0);
         for (Account a : accounts)
-            total += a.interestEarned();
+            total = total.add(a.interestEarned());
+    	readWriteLock.readLock().unlock();
         return total;
+    
+        
     }
 
     public String getStatement() {
-        String statement = null;
-        statement = "Statement for " + name + "\n";
-        double total = 0.0;
+        StringBuffer statement = new StringBuffer();
+        statement.append(HelperUtil.STATEMENT_FOR);
+        statement.append(name);
+        statement.append(HelperUtil.NEW_LINE);
+        readWriteLock.readLock().lock();
+        BigDecimal total = new BigDecimal(0.0);
         for (Account a : accounts) {
-            statement += "\n" + statementForAccount(a) + "\n";
-            total += a.sumTransactions();
+            statement.append(HelperUtil.NEW_LINE);
+            statement.append(a.statementForAccount());
+            statement.append(HelperUtil.NEW_LINE);
+            total = total.add(a.sumTransactions());
         }
-        statement += "\nTotal In All Accounts " + toDollars(total);
-        return statement;
+        
+        statement.append(HelperUtil.NEW_LINE);
+        statement.append(HelperUtil.TOTAL_IN_ALL_ACCOUNTS);
+        statement.append(HelperUtil.toDollars(total));
+    	readWriteLock.readLock().unlock();
+
+        return statement.toString();
+    }
+    
+    public boolean transfer(Account srcAccount, Account destAccount, BigDecimal amount){
+    	boolean success = false;
+    	if (amount.signum() < 0 || amount.compareTo(BigDecimal.ZERO) == 0) {
+            throw new IllegalArgumentException(HelperUtil.AMOUNT_MUST_BE_GREATER_THAN_ZERO);
+        } else {
+        	try{
+        		readWriteLock.writeLock().lock();
+        		if(srcAccount.withdraw(amount))
+        			success = destAccount.deposit(amount);
+        		if(!success){
+        			srcAccount.deposit(amount);//Roll back
+        		}
+        	}finally{
+        		readWriteLock.writeLock().unlock();
+        	}
+        }
+    	return success;
     }
 
-    private String statementForAccount(Account a) {
-        String s = "";
-
-       //Translate to pretty account type
-        switch(a.getAccountType()){
-            case Account.CHECKING:
-                s += "Checking Account\n";
-                break;
-            case Account.SAVINGS:
-                s += "Savings Account\n";
-                break;
-            case Account.MAXI_SAVINGS:
-                s += "Maxi Savings Account\n";
-                break;
-        }
-
-        //Now total up all the transactions
-        double total = 0.0;
-        for (Transaction t : a.transactions) {
-            s += "  " + (t.amount < 0 ? "withdrawal" : "deposit") + " " + toDollars(t.amount) + "\n";
-            total += t.amount;
-        }
-        s += "Total " + toDollars(total);
-        return s;
-    }
-
-    private String toDollars(double d){
-        return String.format("$%,.2f", abs(d));
-    }
-}
+ }
